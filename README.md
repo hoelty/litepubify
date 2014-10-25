@@ -2,13 +2,12 @@
 
 **litepubify** is a program to download stories from literotica.com and convert them to the .epub format for e-book reader use, etc. It can fetch a single story or an entire series.
 
+litepubify is a command line program, written in python (no external dependencies, python version 2.6, 2.7 or >=3)
 
-litepubify is simple python script with no external dependencies (python 2.6, 2.7, >=3)
+Sample usage:
+`$ python litepubify.py 'http://www.literotica.com/s/my-favorite-story'`
 
-written by hoelty
-License: CC0
-
-
+All options:
 ```
 usage: litepubify.py [-h] [-a AUTHOR] [-t TITLE] [-o FILENAME] [-s]
                      [--noteaser] [-v] [-d] [--disk-cache-path PATH]
@@ -41,3 +40,7 @@ optional arguments:
                         mainly useful for testing, to avoid repeated
                         downloads.
 ```
+
+
+Written by hoelty, license: CC0.
+
