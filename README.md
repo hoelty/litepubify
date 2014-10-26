@@ -5,6 +5,7 @@
 litepubify is a command line program, written in python (no external dependencies, python version 2.6, 2.7 or >=3)
 
 Sample usage:
+
 `$ python litepubify.py 'http://www.literotica.com/s/my-favorite-story'`
 
 All options:

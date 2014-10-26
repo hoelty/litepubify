@@ -9,6 +9,8 @@ To fetch an entire series, just provide the URL of one of the stories.
 memberpage of the author and get the links to other parts of the series.)
 
 written for python 2.6, 2.7, >=3
+
+License: CC0 (public domain)
 """
 
 from __future__ import unicode_literals
@@ -25,11 +27,11 @@ import zipfile
 
 # python 2 / 3 compatibility code
 try:
-    from urllib.request import urlopen
-    from urllib.parse import urlparse
-except ImportError:
-    from urllib import urlopen
-    from urlparse import urlparse
+    import urllib.request as compat_urllib_request
+    import urllib.parse as compat_urllib_parse
+except ImportError: # python 2
+    import urllib2 as compat_urllib_request
+    import urlparse as compat_urllib_parse
 if sys.version < '3':
     text_type = unicode
     binary_type = str
@@ -37,6 +39,7 @@ else:
     text_type = str
     binary_type = bytes
 
+VERSION = '0.1'     # the program version
 
 args = None         # command line arguments
 url_mem_cache = {}  # cache for downloaded websites
@@ -276,7 +279,7 @@ def extract_id(url):
       the story id (the last part in the url path component)
     
     """
-    o = urlparse(url)
+    o = compat_urllib_parse.urlparse(url)
     p = o.path
     p = re.sub('/$', '', p)
     idx = p.rfind('/')
@@ -396,8 +399,9 @@ def fetch_url(url):
             utxt = txt.decode('UTF-8')
             url_mem_cache[url] = utxt
             return utxt
-    verbose("fetching '{}'...".format(url))
-    response = urlopen(url)
+    verbose("downloading '{}'...".format(url))
+    req = compat_urllib_request.Request(url, headers={ 'User-Agent': get_user_agent() })
+    response = compat_urllib_request.urlopen(req)
     txt = response.read()
     if args.disk_cache_path:
         f = io.open(path, 'wb')
@@ -541,6 +545,9 @@ class ZipWriter(FrozenClass):
         
     def write(self, path, txt, compress_type=zipfile.ZIP_STORED):
         self.zipfile.writestr(path, txt.encode('UTF-8'), compress_type)
+
+def get_user_agent():
+    return "litepubify {}".format(VERSION)
 
 def verbose(msg):
     """Helper function to output verbose messages in case they have been activated.
