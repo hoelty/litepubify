@@ -303,8 +303,6 @@ def get_story_text(st):
         if not text_match: error("Couldn't find text body.")
         text = text_match.group(1)
         text = text.strip()
-        global ho
-        ho = text
         strip_outer_p_match = re.search(r'^<p>(.*)</p>$', text, re.DOTALL)
         if strip_outer_p_match:
             text = strip_outer_p_match.group(1)
@@ -625,8 +623,6 @@ NAV_POINT_TEMPLATE = """
       </navLabel>
       <content src="{filename}"/>
     </navPoint>"""
-
-MY_CONTENT = """<p>this is some <i>random</i> test</p>"""
 
 TXT_HTML_TEMPLATE = """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml">
