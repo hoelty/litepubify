@@ -86,12 +86,14 @@ def main():
                     found_story = st
                     found_series = series
                     break
+            if found_series: break
     
         if not found_series: error("Couldn't find story on members page")
         
-        debug(found_series.title)
-        for st in found_series.stories:
-            debug('  {}'.format(st))
+        if args.debug:
+            debug(found_series.title)
+            for st in found_series.stories:
+                debug('  {}'.format(st))
 
     if args.author: author = args.author
     if found_series and not args.single:
