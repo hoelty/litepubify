@@ -32,6 +32,14 @@ try:
 except ImportError: # python 2
     import urllib2 as compat_urllib_request
     import urlparse as compat_urllib_parse
+try:
+    import html.parser as compat_html_parser
+except ImportError: # python 2
+    import HTMLParser as compat_html_parser
+try:
+    from html import escape as compat_escape
+except ImportError: # python 2
+    from cgi import escape as compat_escape
 if sys.version < '3':
     text_type = unicode
     binary_type = str
@@ -39,7 +47,7 @@ else:
     text_type = str
     binary_type = bytes
 def get_content_type(response):
-    """Get the content-type from a download response.
+    """Get the content-type from a download response header.
 
     Args:
       response (Python 2: urllib.addinfourl; Python 3: http.client.HTTPResponse): the http response object
@@ -214,6 +222,10 @@ def add_story_to_ebook(st, filename, book):
 
     txt = make_tags_xml_compliant(txt)
 
+    cleaner = XHTMLCleaner()
+    cleaner.feed(txt)
+    txt = cleaner.get_output()
+
     txt = TITLE_TEMPLATE.format(title=st.title, author=st.author) + txt
     html = TXT_HTML_TEMPLATE.format(title=book.title, content=txt)
     book.add_html(st.title, st.teaser, html, filename)
@@ -264,6 +276,51 @@ def make_tags_xml_compliant(html):
                 return '<' + s + '/>'
         html = re.sub(r'<(.*?)>', check_and_fix, html)
     return html
+
+class XHTMLCleaner(compat_html_parser.HTMLParser):
+    """Fixes certain problems with broken tags in HTML.
+
+    It detects closing tags that have not been opened before and strips those.
+
+    E.g. the string
+        "this is </i>so</i> broken <br/>"
+    becomes
+        "this is so broken <br/>".
+
+    """
+    def __init__(self):
+        compat_html_parser.HTMLParser.__init__(self)
+        self.open_tags = {}
+        self.accum = ''
+
+    def handle_starttag(self, tag, attr):
+        if not tag in self.open_tags:
+            self.open_tags[tag] = 0
+        self.open_tags[tag] += 1
+        self.out(self.get_starttag_text())
+    def handle_endtag(self, tag):
+        if not tag in self.open_tags:
+            self.open_tags[tag] = 0
+        if self.open_tags[tag] <= 0: # this is a problem - omit tag
+            return
+        self.open_tags[tag] -= 1
+        self.out("</"+tag+">")
+    def handle_startendtag(self, tag, attr):
+        self.out(self.get_starttag_text())
+    def handle_data(self, data):
+        self.out(data)
+    def handle_entityref(self, name):
+        self.out('&'+name+';')
+    def handle_charref(self, name):
+        self.out('&#'+name+';')
+    def handle_comment(self, data):
+        self.out('<!--'+data+'-->')
+
+    def out(self, data):
+        self.accum += data
+
+    def get_output(self):
+        return self.accum
 
 def parse_story_list(html):
     """Parse the list of stories from the submissions section of the author's memberpage.
