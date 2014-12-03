@@ -38,6 +38,22 @@ if sys.version < '3':
 else:
     text_type = str
     binary_type = bytes
+def get_content_type(response):
+    """Get the content-type from a download response.
+
+    Args:
+      response (Python 2: urllib.addinfourl; Python 3: http.client.HTTPResponse): the http response object
+
+    Returns:
+      text: the content type from the headers
+
+    """
+    try:
+        return response.info().get_content_type()
+    except AttributeError: # python 2
+        t = response.info().type
+        return t.decode('UTF-8')
+
 
 VERSION = '0.1'     # the program version
 
@@ -50,18 +66,18 @@ all_series = None   # all the series found, global for debugging
 def main():
     global all_oneshots
     global all_series
-    
+
     parse_commandline_arguments()
 
-    story_html = fetch_url(args.url)
+    story_html, _ = fetch_url(args.url)
     page_id = extract_id(args.url)
-    
+
     (title, author, memberpage_url) = parse_story_header(story_html)
     debug("title: '{}', author: '{}', memberpage: '{}'".format(title, author, memberpage_url))
-    
-    memberpage = fetch_url(memberpage_url)
+
+    memberpage, _ = fetch_url(memberpage_url)
     (all_oneshots, all_series) = parse_story_list(memberpage)
-    
+
     if args.debug:
         debug('ALL STORIES BY AUTHOR {}:'.format(author))
         for st in all_oneshots:
@@ -71,14 +87,14 @@ def main():
             debug('{}'.format(series.title))
             for st in series.stories:
                 debug('    {}'.format(st))
-    
+
     found_story = None
     found_series = None
     for st in all_oneshots:
         if extract_id(st.url) == page_id:
             found_story = st
             break
-    
+
     if not found_story:
         for series in all_series:
             for st in series.stories:
@@ -87,9 +103,9 @@ def main():
                     found_series = series
                     break
             if found_series: break
-    
+
         if not found_series: error("Couldn't find story on members page")
-        
+
         if args.debug:
             debug(found_series.title)
             for st in found_series.stories:
@@ -100,7 +116,7 @@ def main():
         make_epub_from_story_or_series(found_series, author)
     else:
         make_epub_from_story_or_series(found_story, author)
-    
+
 def parse_commandline_arguments():
     """Parse the command line arguments.
     """
@@ -119,13 +135,13 @@ def parse_commandline_arguments():
 
 def parse_story_header(html):
     """Parses the header of the story html to find title, author and the link to the author's memberpage.
-    
+
     Args:
       html (text): the full html text of the story
-    
+
     Returns:
       title, author and memberpage url as a 3-tuple
-      
+
     """
     header_match = re.search(r'<div class="b-story-header">(.*?)</div>', html, flags=re.DOTALL)
     if not header_match:
@@ -142,10 +158,10 @@ def parse_story_header(html):
 
 def make_epub_from_story_or_series(s, author):
     """Make epub file from story or series.
-    
+
     Args:
         s (Story or Series): the story or series to make an epub from
-    
+
     """
     book = EpubBook()
     book.title = s.title
@@ -169,7 +185,7 @@ def make_epub_from_story_or_series(s, author):
 
 def add_story_to_ebook(st, filename, book):
     """Add a story to an ebook.
-    
+
     Args:
         st (Story): the story
         filename (text): filename for the section in the ebook
@@ -177,28 +193,74 @@ def add_story_to_ebook(st, filename, book):
     """
     txt = get_story_text(st)
     txt = make_tags_lowercase(txt)
+
+    # include image files and make fix image URLs
+    def sub_img(m):
+        pattern = re.compile(r' src="(.*?)"')
+        rel_url_match = re.search(pattern, m.group(0))
+        rel_url = rel_url_match.group(1)
+        url = compat_urllib_parse.urljoin(st.url, rel_url)
+        img_data, mime_type = fetch_url(url, binary=True)
+        parsed_url = compat_urllib_parse.urlparse(url)
+        path = parsed_url.path
+        filename = os.path.basename(path)
+        final_url = book.add_image(filename, img_data, mime_type)
+        return re.sub(pattern, ' src="{}"'.format(final_url), m.group(0))
+
+    txt = re.sub(r'<img.*?>', sub_img, txt)
+
+    txt = make_tags_xml_compliant(txt)
+
     txt = TITLE_TEMPLATE.format(title=st.title, author=st.author) + txt
     html = TXT_HTML_TEMPLATE.format(title=book.title, content=txt)
     book.add_html(st.title, st.teaser, html, filename)
-    
+
 def make_tags_lowercase(html):
     """Convert tags like <I>...</I> to lowercase version <i>...</i>.
-    
-        This has to be done for xhtml 1.1 compliance.
-        The method with regex is sort of hackish, but should work for most cases.
-        
-        Args:
-          html (text): the html text
-          
-        Returns:
-          unicode: the fixed html text
+
+    This has to be done for xhtml 1.1 compliance.
+    The method with regex is sort of hackish, but should work for most cases.
+
+    Args:
+      html (text): the html text
+
+    Returns:
+      text: the fixed html text
     """
     def tag_lower(tag_match):
         t = tag_match.group(0)
         t = re.sub(r'<\s*/?\s*(\w+)[\s/>]', lambda s: s.group(0).lower(), t)
         return re.sub(r'\w+="', lambda s: s.group(0).lower(), t)
     return re.sub(r'<.*?>', tag_lower, html)
-    
+
+def make_tags_xml_compliant(html):
+    """Make sure, the tags are proper XML.
+
+    Converts <img ... > to <img ... />. (Same for <br>)
+
+    We do not handle the case where there is an opening
+    and an closing tag, for example <br></br> as it is
+    not very common.
+
+    Args:
+        html (text): the html text
+
+    Returns:
+      text: the fixed html text
+    """
+    tags = ['img', 'br']
+    for tag in tags:
+        def check_and_fix(m):
+            s = m.group(1)
+            if not s.lstrip().startswith(tag):
+                return m.group(0)
+            check_match = re.search(r'/\s*$', s)
+            if check_match:
+                return m.group(0)
+            else:
+                return '<' + s + '/>'
+        html = re.sub(r'<(.*?)>', check_and_fix, html)
+    return html
 
 def parse_story_list(html):
     """Parse the list of stories from the submissions section of the author's memberpage.
@@ -207,11 +269,11 @@ def parse_story_list(html):
     if not author_match:
         error("Cannot determine author on member page.")
     author = author_match.group(1)
-    
+
     subm_table_match = re.search(r'<table.*?>.*?<col .*?(<tr .*?)</table>', html, flags=re.DOTALL)
     if not subm_table_match:
         error("Cannot find list of submissions on member page.")
-    
+
     trs = re.findall(r'(<tr.*?</tr>)', subm_table_match.group(1), re.DOTALL)
     all_series = []
     all_oneshots = []
@@ -230,7 +292,7 @@ def parse_story_list(html):
         elif tr.startswith(r'<tr class="sl">') or tr.startswith(r'<tr class="root-story'):
             tds = re.findall(r'<td.*?>(.*?)</td>', tr, re.DOTALL)
             if len(tds) != 4: error("Unexpected number of fields (expected 4 but where {}): '{}'".format(len(tds), tr))
-            
+
             td0_match = re.search(r'<a .*?href="(.*?)">(.*?)</a>.*?[(](.*?)[)]', tds[0])
             if not td0_match: error("Couldn't match 1st field: '{}'".format(tds[0]))
             story = Story()
@@ -240,7 +302,7 @@ def parse_story_list(html):
             story.title = re.sub(r'<span>|</span>|<!--.*?-->', '', story.title)
             story.author = author
             story.rating = td0_match.group(3)
-            
+
             td1_match = re.search(r'^\s*([^<]*)(<|$)', tds[1], flags=re.DOTALL | re.UNICODE)
             if not td1_match: error("Couldn't match 2nd field: '{}'".format(tds[1]))
             story.teaser = td1_match.group(1)
@@ -249,13 +311,13 @@ def parse_story_list(html):
                 story.hot = True
             else:
                 story.hot = False
-            
+
             td2_match = re.search(r'<span>(.*?)</span>', tds[2])
             story.category = td2_match.group(1)
-            
+
             td3_match = re.search(r'\s*(.+)\s*', tds[3])
             story.date = td3_match.group(1)
-            
+
             if tr.startswith(r'<tr class="sl">'):
                 series.stories.append(story)
                 story = None
@@ -269,17 +331,17 @@ def parse_story_list(html):
             error("Unkown row type: '{}'".format(tr))
 
     return (all_oneshots, all_series)
-        
+
 
 def extract_id(url):
     """Extract the story id from a URL.
-    
+
     Args:
       url: the URL
-    
+
     Returns:
       the story id (the last part in the url path component)
-    
+
     """
     o = compat_urllib_parse.urlparse(url)
     p = o.path
@@ -287,9 +349,9 @@ def extract_id(url):
     idx = p.rfind('/')
     if idx == -1: error("unexpected url: {}".format(url))
     return p[idx+1:]
-    
+
 def get_story_text(st):
-    html = fetch_url(st.url) # assuming url leads to first page and has no query part
+    html, _ = fetch_url(st.url) # assuming url leads to first page and has no query part
     sel_match = re.search(r'<div class="b-pager-pages">(.*?)</div>', html)
     if not sel_match: error("Couldn't find page selection part.")
     vals = re.findall('<option value=".*?">(\d+)</option>', sel_match.group(1))
@@ -300,7 +362,7 @@ def get_story_text(st):
         url = st.url + '?page=' + v
         if v == '1':
             url = st.url
-        html = fetch_url(url)
+        html, _ = fetch_url(url)
         text_match = re.search(r'<div class="b-story-body-x.*?">.*?<div>(.*?)</div>', html, re.DOTALL)
         if not text_match: error("Couldn't find text body.")
         text = text_match.group(1)
@@ -308,17 +370,19 @@ def get_story_text(st):
         strip_outer_p_match = re.search(r'^<p>(.*)</p>$', text, re.DOTALL)
         if strip_outer_p_match:
             text = strip_outer_p_match.group(1)
+
+
         if complete_text == None:
             complete_text = text
         else:
             complete_text += '\n\n' + text
 
     if not complete_text:
-        warning('Unable to extract test for {}.'.format(st.url))
+        warning('Unable to extract text for {}.'.format(st.url))
     complete_text = '<p>{}</p>'.format(complete_text)
 
     return complete_text
-    
+
 
 class FrozenClass(object):
     """Auxiliary base class to prevent access to attributes that haven't been set in __init__
@@ -336,7 +400,7 @@ class FrozenClass(object):
 
 class Story(FrozenClass):
     """A single story.
-    
+
     Attributes:
       title (text): the title of the story
       teaser (text): a one line description
@@ -358,19 +422,19 @@ class Story(FrozenClass):
         self.category = None
         self.date = None
         self._freeze()
-    
+
     def __repr__(self):
         return '<"{}" - "{}" ({}) {}{} - {}, {}>'.format(self.title, self.teaser, self.rating, 'H ' if self.hot else '', self.url, self.category, self.date)
         return str(vars(self))
-        
+
 class Series(FrozenClass):
     """A series of multiple stories.
-    
+
     Attributes:
       title (text): the title of the series
       author (text): the author of the series
       stories list(Story): the list of stories of the series
-      
+
     """
     def __init__(self):
         self.title = None
@@ -380,56 +444,69 @@ class Series(FrozenClass):
 
     def __repr__(self):
         return str(self.stories)
-    
 
-def fetch_url(url):
+
+def fetch_url(url, binary=False):
     """Download contents of a webpage.
-    
+
     It does not check the encoding and simply
     assumes the document is UTF-8 encoded.
 
     Args:
-        url: the URL of the webpage
+      url: the URL of the webpage
+      binary (bool): if the downloaded content is binary data, e.g. an image
 
     Returns:
-        text: The content of the page
+      (data, mime_type):
+        data: downloaded text, if binary is False, the downloaded binary data otherwise
+        mime_type: The mime type of the data, e.g. image/png.
     """
     global url_mem_cache
     if url in url_mem_cache:
         return url_mem_cache[url]
     if args.disk_cache_path:
         path = os.path.join(args.disk_cache_path, url_to_filepath_hash(url))
-        if (os.path.isfile(path)):
-            txt = io.open(path, 'rb').read()
-            utxt = txt.decode('UTF-8')
-            url_mem_cache[url] = utxt
-            return utxt
+        mime_path = os.path.join(args.disk_cache_path, url_to_filepath_hash(url) + 'MIME')
+        if (os.path.isfile(path) and os.path.isfile(mime_path)):
+            verbose("fetched from disk cache: '{}'".format(url))
+            data = io.open(path, 'rb').read()
+            if not binary:
+                data = data.decode('UTF-8')
+            mime_type = io.open(mime_path, 'rb').read()
+            mime_type = mime_type.decode('UTF-8')
+            url_mem_cache[url] = (data, mime_type)
+            return data, mime_type
     verbose("downloading '{}'...".format(url))
     req = compat_urllib_request.Request(url, headers={ 'User-Agent': get_user_agent() })
     response = compat_urllib_request.urlopen(req)
-    txt = response.read()
+    data = response.read()
+    mime_type = get_content_type(response)
     if args.disk_cache_path:
         f = io.open(path, 'wb')
-        f.write(txt)
+        f.write(data)
         f.close()
-    utxt = txt.decode('UTF-8')
-    url_mem_cache[url] = utxt
-    return utxt
-    
+        f2 = io.open(mime_path, 'wb')
+        f2.write(mime_type.encode('UTF-8'))
+        f2.close()
+    if not binary:
+        data = data.decode('UTF-8')
+    url_mem_cache[url] = (data, mime_type)
+    return data, mime_type
+
 def url_to_filepath_hash(url):
     salted = url+'la;l;vdoids'
     return hashlib.sha224(salted.encode('UTF-8')).hexdigest()
 
 class EpubSection(FrozenClass):
     """One section / chapter of the ebook.
-    
+
     Attributes:
       id (text): an id that is generated and used internally
       title (text): the title of the section / chapter
       teaser (text): a one line description which is included in the t.o.c.
       html (text): the html content
       filename (text): the filename, e.g. 'part1.html'
-      
+
     """
     def __init__(self):
         self.id = ''
@@ -438,12 +515,31 @@ class EpubSection(FrozenClass):
         self.html = ''
         self.filename = ''
         self._freeze()
-    
+
+class EpubImage(FrozenClass):
+    """An image that will be included in the ebook.
+
+    Attributes:
+      id (text): an id that is generated and used internally
+      filename (text): the filename, without path
+      full_path (text): the full path for the image, as it will be saved in the ebook
+      data (binary): the image file content
+      mime_type (text): mime type for the image, e.g. image/png
+    """
+    def __init__(self):
+        self.id = None
+        self.filename = None
+        self.full_path = None
+        self.data = None
+        self.mime_type = None
+        self._freeze()
+
 class EpubBook(FrozenClass):
     def __init__(self):
         self.root_dir = ''
         self.UUID = uuid.uuid1()
         self.sections = []
+        self.images = []
         self.title = ''
         self.creator = ''
         self._freeze()
@@ -451,7 +547,7 @@ class EpubBook(FrozenClass):
     def add_html(self, title, teaser, html, filename):
         """
         Add a new html file as a section / chapter of the epub.
-        
+
         Args:
           title (text): the title of the section / chapter
           teaser (text): a one line description which is included in the t.o.c.
@@ -466,14 +562,41 @@ class EpubBook(FrozenClass):
         section.teaser = teaser
         self.sections.append(section)
 
-    def _write_mimetype(self, writer):
-        writer.write('mimetype', 'application/epub+zip', zipfile.ZIP_STORED)
+    def add_image(self, filename, data, mime_type):
+        """
+        Add a new image file to be included in the epub.
         
+        Args:
+          filename (text): the filename of the image (without path)
+          data (binary): the image file content
+          mime_type (text): the mime_type of the image
+        
+        Returns:
+          text: The final URL, for the <img src="..."/> tag in the XHTML.
+        """
+        image = EpubImage()
+        num = '{:03d}'.format(len(self.images) + 1)
+        image.id = 'img' + num
+        image.filename = num + filename
+        image.full_path = os.path.join('images', image.filename)
+        image.data = data
+        image.mime_type = mime_type
+        self.images.append(image)
+        return image.full_path
+
+    def _write_mimetype(self, writer):
+        writer.write('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
+
     def _write_items(self, writer):
         for section in self.sections:
             writer.write(
                 os.path.join('OEBPS', section.filename),
                 section.html)
+        for image in self.images:
+            writer.write(
+                os.path.join('OEBPS', image.full_path),
+                image.data,
+                binary=True)
 
     def _write_container_xml(self, writer):
         writer.write(os.path.join('META-INF', 'container.xml'), CONTAINER_TEMPLATE)
@@ -482,8 +605,16 @@ class EpubBook(FrozenClass):
         manifest = ''
         spine = ''
         for section in self.sections:
-            manifest += MANIFEST_ITEM_TEMPLATE.format(id=section.id, filename=section.filename)
+            manifest += MANIFEST_ITEM_TEMPLATE.format(
+                id=section.id,
+                filename=section.filename,
+                mediatype='application/xhtml+xml')
             spine += SPINE_ITEM_TEMPLATE.format(id=section.id)
+        for image in self.images:
+            manifest += MANIFEST_ITEM_TEMPLATE.format(
+                id=image.id,
+                filename=image.full_path,
+                mediatype=image.mime_type)
         txt = CONTENT_TEMPLATE.format(title=self.title, creator=self.creator, uuid=self.UUID, manifest=manifest, spine=spine)
         writer.write(os.path.join('OEBPS', 'content.opf'), txt)
 
@@ -497,14 +628,14 @@ class EpubBook(FrozenClass):
             nav_points += NAV_POINT_TEMPLATE.format(id=section.id, playorder=i, title=title, filename=section.filename)
             i += 1
         writer.write(os.path.join('OEBPS', 'toc.ncx'), NCX_TEMPLATE.format(uuid=self.UUID, title=self.title, nav=nav_points))
-    
+
     def write_all(self, writer):
         self._write_mimetype(writer)
         self._write_items(writer)
         self._write_container_xml(writer)
         self._write_content_opf(writer)
         self._write_toc_ncx(writer)
-    
+
     def make_epub(self, filename):
         """Create the .epub file.
         Args:
@@ -528,16 +659,19 @@ class FileWriter(FrozenClass):
     def __init__(self, ebook):
         self.ebook = ebook
         self._freeze()
-        
-    def write(self, path, txt, compress_type=zipfile.ZIP_STORED):
+
+    def write(self, path, data, binary = False, compress_type=zipfile.ZIP_STORED):
         fullpath = os.path.join(self.ebook.root_dir, path)
         dirpath = os.path.split(fullpath)[0]
         try:
             os.makedirs(dirpath)
         except OSError:
             pass
-        fout = io.open(fullpath, 'w', encoding='UTF-8')
-        fout.write(txt)
+        if binary:
+            fout = io.open(fullpath, 'wb')
+        else:
+            fout = io.open(fullpath, 'w', encoding='UTF-8')
+        fout.write(data)
         fout.close()
 
 class ZipWriter(FrozenClass):
@@ -547,9 +681,11 @@ class ZipWriter(FrozenClass):
         self.zipfile = zipfile
         self.ebook = ebook
         self._freeze()
-        
-    def write(self, path, txt, compress_type=zipfile.ZIP_STORED):
-        self.zipfile.writestr(path, txt.encode('UTF-8'), compress_type)
+
+    def write(self, path, data, binary = False, compress_type=zipfile.ZIP_STORED):
+        if not binary:
+            data = data.encode('UTF-8')
+        self.zipfile.writestr(path, data, compress_type)
 
 def get_user_agent():
     return "litepubify {}".format(VERSION)
@@ -603,7 +739,7 @@ CONTENT_TEMPLATE = """<?xml version='1.0' encoding='utf-8'?>
 </package>"""
 
 MANIFEST_ITEM_TEMPLATE = """
-    <item id="{id}" href="{filename}" media-type="application/xhtml+xml"/>"""
+    <item id="{id}" href="{filename}" media-type="{mediatype}"/>"""
 
 SPINE_ITEM_TEMPLATE = """
     <itemref idref="{id}"/>"""
