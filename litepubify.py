@@ -128,6 +128,7 @@ def parse_commandline_arguments():
     parser.add_argument('-o', '--output', metavar='FILENAME', help='set output file name (optional, otherwise story title is used)')
     parser.add_argument('-s', '--single', action='store_true', help='do not attempt to download the entire series (if it is a series) but just this one story')
     parser.add_argument('--noteaser', action='store_true', help='do not include the one line teaser in the table of contents')
+    parser.add_argument('--noimages', action='store_true', help='do not include any images (in case of illustrated stories)')
     parser.add_argument('-v', '--verbose', action='store_true', help='output more information')
     parser.add_argument('-d', '--debug', action='store_true', help='output debug information')
     parser.add_argument('--disk-cache-path', metavar='PATH', help='Path for the disk cache (optional, usually not required). If this option is specified, downloaded websites are cached in a file and loaded from disk in subsequent runs (when this option is used again with the same path). This is mainly useful for testing, to avoid repeated downloads. Without this option, litepubify keeps everything in memory and only writes the final epub file to disk.')
@@ -196,6 +197,8 @@ def add_story_to_ebook(st, filename, book):
 
     # include image files and make fix image URLs
     def sub_img(m):
+        if args.noimages:
+            return ''
         pattern = re.compile(r' src="(.*?)"')
         rel_url_match = re.search(pattern, m.group(0))
         rel_url = rel_url_match.group(1)
