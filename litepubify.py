@@ -114,7 +114,7 @@ def parse_commandline_arguments():
     parser.add_argument('--noteaser', action='store_true', help='do not include the one line teaser in the table of contents')
     parser.add_argument('-v', '--verbose', action='store_true', help='output more information')
     parser.add_argument('-d', '--debug', action='store_true', help='output debug information')
-    parser.add_argument('--disk-cache-path', metavar='PATH', help='Path for the disk cache (this is normally not needed). If this option is specified, downloaded websites are cached in a file and loaded in subsequent runs (when this option is used again with the same path). This is mainly useful for testing, to avoid repeated downloads.')
+    parser.add_argument('--disk-cache-path', metavar='PATH', help='Path for the disk cache (optional, usually not required). If this option is specified, downloaded websites are cached in a file and loaded from disk in subsequent runs (when this option is used again with the same path). This is mainly useful for testing, to avoid repeated downloads. Without this option, litepubify keeps everything in memory and only writes the final epub file to disk.')
     args = parser.parse_args()
 
 def parse_story_header(html):
@@ -293,6 +293,8 @@ def get_story_text(st):
     sel_match = re.search(r'<div class="b-pager-pages">(.*?)</div>', html)
     if not sel_match: error("Couldn't find page selection part.")
     vals = re.findall('<option value=".*?">(\d+)</option>', sel_match.group(1))
+    if not vals: # just one page
+        vals = ['1']
     complete_text = None
     for v in vals:
         url = st.url + '?page=' + v
@@ -311,7 +313,10 @@ def get_story_text(st):
         else:
             complete_text += '\n\n' + text
 
-    complete_text = '<p>{}</p>'.format(complete_text)            
+    if not complete_text:
+        warning('Unable to extract test for {}.'.format(st.url))
+    complete_text = '<p>{}</p>'.format(complete_text)
+
     return complete_text
     
 
@@ -560,6 +565,11 @@ def debug(msg):
     """
     if args.debug:
         print(msg)
+
+def warning(msg):
+    """Helper function to issue a warning.
+    """
+    print("Warning: "+msg)
 
 def error(msg):
     """Helper function to raise an error.
