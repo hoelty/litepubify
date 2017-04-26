@@ -178,6 +178,12 @@ def make_epub_from_story_or_series(s, author):
     if args.title: book.title = args.title
     book.creator = author
 
+    cover_txt = COVER_TEMPLATE.format(
+        title=saxutils.escape(book.title),
+        author=saxutils.escape(author))
+    cover_html = TXT_HTML_TEMPLATE.format(title='cover', content=cover_txt)
+    book.add_cover(cover_html)
+
     if isinstance(s, Story):
         add_story_to_ebook(s, 'content.html', book)
     else:
@@ -228,7 +234,7 @@ def add_story_to_ebook(st, filename, book):
     txt = cleaner.get_output()
 
     txt = TITLE_TEMPLATE.format(title=st.title, author=st.author) + txt
-    html = TXT_HTML_TEMPLATE.format(title=book.title, content=txt)
+    html = TXT_HTML_TEMPLATE.format(title=saxutils.escape(book.title), content=txt)
     book.add_html(st.title, st.teaser, html, filename)
 
 def make_tags_lowercase(html):
@@ -603,6 +609,7 @@ class EpubBook(FrozenClass):
         self.images = []
         self.title = ''
         self.creator = ''
+        self._cover = None
         self._freeze()
 
     def add_html(self, title, teaser, html, filename):
@@ -645,10 +652,17 @@ class EpubBook(FrozenClass):
         self.images.append(image)
         return image.full_path
 
+    def add_cover(self, html):
+        self._cover = html
+
     def _write_mimetype(self, writer):
         writer.write('mimetype', 'application/epub+zip', compress_type=zipfile.ZIP_STORED)
 
     def _write_items(self, writer):
+        if self._cover:
+            writer.write(
+                os.path.join('OEBPS', 'cover.html'),
+                self._cover)
         for section in self.sections:
             writer.write(
                 os.path.join('OEBPS', section.filename),
@@ -663,20 +677,37 @@ class EpubBook(FrozenClass):
         writer.write(os.path.join('META-INF', 'container.xml'), CONTAINER_TEMPLATE)
 
     def _write_content_opf(self, writer):
+        metacover = ''
         manifest = ''
         spine = ''
+        guide = ''
+        if self._cover:
+            metacover = META_COVER_TEMPLATE;
+            manifest += MANIFEST_ITEM_TEMPLATE.format(
+                id='cover',
+                filename='cover.html',
+                mediatype='application/xhtml+xml')
+            spine += SPINE_ITEM_TEMPLATE.format(id='cover', add=' linear="no"')
+            guide = GUIDE_TEMPLATE;
         for section in self.sections:
             manifest += MANIFEST_ITEM_TEMPLATE.format(
                 id=section.id,
                 filename=section.filename,
                 mediatype='application/xhtml+xml')
-            spine += SPINE_ITEM_TEMPLATE.format(id=section.id)
+            spine += SPINE_ITEM_TEMPLATE.format(id=section.id, add='')
         for image in self.images:
             manifest += MANIFEST_ITEM_TEMPLATE.format(
                 id=image.id,
                 filename=image.full_path,
                 mediatype=image.mime_type)
-        txt = CONTENT_TEMPLATE.format(title=saxutils.escape(self.title), creator=saxutils.escape(self.creator), uuid=self.UUID, manifest=manifest, spine=spine)
+        txt = CONTENT_TEMPLATE.format(
+            title=saxutils.escape(self.title),
+            creator=saxutils.escape(self.creator),
+            uuid=self.UUID,
+            metacover=metacover,
+            manifest=manifest,
+            spine=spine,
+            guide=guide)
         writer.write(os.path.join('OEBPS', 'content.opf'), txt)
 
     def _write_toc_ncx(self, writer):
@@ -790,20 +821,28 @@ CONTENT_TEMPLATE = """<?xml version='1.0' encoding='utf-8'?>
     <dc:title>{title}</dc:title>
     <dc:creator>{creator}</dc:creator>
     <dc:identifier id="bookid">urn:uuid:{uuid}</dc:identifier>
-    <dc:language>en-US</dc:language>
+    <dc:language>en-US</dc:language>{metacover}
   </metadata>
   <manifest>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>{manifest}
   </manifest>
   <spine toc="ncx">{spine}
-  </spine>
+  </spine>{guide}
 </package>"""
+
+META_COVER_TEMPLATE = """
+    <meta name="cover" content="cover"/>"""
 
 MANIFEST_ITEM_TEMPLATE = """
     <item id="{id}" href="{filename}" media-type="{mediatype}"/>"""
 
 SPINE_ITEM_TEMPLATE = """
-    <itemref idref="{id}"/>"""
+    <itemref idref="{id}"{add}/>"""
+
+GUIDE_TEMPLATE = """
+  <guide>
+    <reference href="cover.html" title="cover" type="cover" />
+  </guide>"""
 
 NCX_TEMPLATE = """<?xml version='1.0' encoding='utf-8'?>
 <!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN"
@@ -841,8 +880,11 @@ TXT_HTML_TEMPLATE = """<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http:/
   </body>
 </html>"""
 
+COVER_TEMPLATE = """<h1 style="text-align: center">{title}</h1>
+<p style="text-align: center">by <i>{author}</i></p>
+"""
 
-TITLE_TEMPLATE = """<h1>{title}</h1>
+TITLE_TEMPLATE = """<h2>{title}</h2>
 <p>by <i>{author}</i></p>
 <hr />
 """
