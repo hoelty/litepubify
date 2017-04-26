@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import uuid
+import xml.sax.saxutils as saxutils
 import zipfile
 
 # python 2 / 3 compatibility code
@@ -675,7 +676,7 @@ class EpubBook(FrozenClass):
                 id=image.id,
                 filename=image.full_path,
                 mediatype=image.mime_type)
-        txt = CONTENT_TEMPLATE.format(title=self.title, creator=self.creator, uuid=self.UUID, manifest=manifest, spine=spine)
+        txt = CONTENT_TEMPLATE.format(title=saxutils.escape(self.title), creator=saxutils.escape(self.creator), uuid=self.UUID, manifest=manifest, spine=spine)
         writer.write(os.path.join('OEBPS', 'content.opf'), txt)
 
     def _write_toc_ncx(self, writer):
