@@ -11,8 +11,9 @@ Sample usage:
 All options:
 ```
 usage: litepubify.py [-h] [-a AUTHOR] [-t TITLE] [-o FILENAME] [-s]
-                     [--noteaser] [-v] [-d] [--disk-cache-path PATH]
-                     url
+                     [--noteaser] [--noimages] [-v] [-d] [--silent]
+                     [--disk-cache-path PATH]
+                     url [url ...]
 
 positional arguments:
   url                   URL of the story, or one of the stories in the series

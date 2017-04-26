@@ -78,8 +78,7 @@ def main():
 
     parse_commandline_arguments()
 
-    story_html, _ = fetch_url(args.url)
-    page_id = extract_id(args.url)
+    story_html, _ = fetch_url(args.url[0])
 
     (title, author, memberpage_url) = parse_story_header(story_html)
     debug("title: '{}', author: '{}', memberpage: '{}'".format(title, author, memberpage_url))
@@ -97,41 +96,47 @@ def main():
             for st in series.stories:
                 debug('    {}'.format(st))
 
-    found_story = None
-    found_series = None
-    for st in all_oneshots:
-        if extract_id(st.url) == page_id:
-            found_story = st
-            break
+    found_oneshots_and_series = []
+    for url in args.url:
+        story_html, _ = fetch_url(url)
+        page_id = extract_id(url)
+        found_story = None
+        found_series = None
+        for st in all_oneshots:
+            if extract_id(st.url) == page_id:
+                found_story = st
+                found_oneshots_and_series.append(found_story)
+                break
 
-    if not found_story:
-        for series in all_series:
-            for st in series.stories:
-                if extract_id(st.url) == page_id:
-                    found_story = st
-                    found_series = series
-                    break
-            if found_series: break
+        if not found_story:
+            for series in all_series:
+                for story in series.stories:
+                    if extract_id(story.url) == page_id:
+                        found_story = story
+                        found_series = series
+                        if args.single:
+                            found_oneshots_and_series.append(story)
+                        else:
+                            found_oneshots_and_series.append(series)
+                        break
+                if found_series: break
 
-        if not found_series: error("Couldn't find story on members page")
+            if not found_series: error("Couldn't find story on members page")
 
-        if args.debug:
-            debug(found_series.title)
-            for st in found_series.stories:
-                debug('  {}'.format(st))
+            if args.debug:
+                debug(found_series.title)
+                for story in found_series.stories:
+                    debug('  {}'.format(story))
 
     if args.author: author = args.author
-    if found_series and not args.single:
-        make_epub_from_story_or_series(found_series, author)
-    else:
-        make_epub_from_story_or_series(found_story, author)
+    make_epub_from_stories_and_series(found_oneshots_and_series, author)
 
 def parse_commandline_arguments():
     """Parse the command line arguments.
     """
     global args
     parser = argparse.ArgumentParser()
-    parser.add_argument('url', help='URL of the story, or one of the stories in the series')
+    parser.add_argument('url', nargs='+', help='URL of the story, or one of the stories in the series')
     parser.add_argument('-a', '--author', help='override the author in the epub metadata')
     parser.add_argument('-t', '--title', help='override the title in the epub metadata and default file name')
     parser.add_argument('-o', '--output', metavar='FILENAME', help='set output file name (optional, otherwise story title is used)')
@@ -167,7 +172,7 @@ def parse_story_header(html):
     author = header_match2.group(3)
     return (title, author, memberpage_url)
 
-def make_epub_from_story_or_series(s, author):
+def make_epub_from_stories_and_series(stories_and_series, author):
     """Make epub file from story or series.
 
     Args:
@@ -175,7 +180,7 @@ def make_epub_from_story_or_series(s, author):
 
     """
     book = EpubBook()
-    book.title = s.title
+    book.title = stories_and_series[0].title
     if args.title: book.title = args.title
     book.creator = author
 
@@ -185,13 +190,20 @@ def make_epub_from_story_or_series(s, author):
     cover_html = TXT_HTML_TEMPLATE.format(title='cover', content=cover_txt)
     book.add_cover(cover_html)
 
-    if isinstance(s, Story):
-        add_story_to_ebook(s, 'content.html', book)
-    else:
-        i = 1
-        for st in s.stories:
-            add_story_to_ebook(st, 'part{0:02d}.html'.format(i), book)
-            i += 1
+    s_count = 1
+    for s in stories_and_series:
+        if isinstance(s, Story):
+            add_story_to_ebook(s, 'content{0:02d}.html'.format(s_count), book)
+        else:
+            chap_count = 1
+            for st in s.stories:
+                add_story_to_ebook(
+                    st,
+                    'part{0:02d}x{1:02d}.html'.format(s_count, chap_count),
+                    book)
+                chap_count += 1
+                info(chap_count)
+        s_count += 1
 
     path = re.sub(r'[^\w_. -]', r'_', book.title, flags=re.UNICODE)
     arch_filename = path + '.epub'
