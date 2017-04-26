@@ -140,6 +140,7 @@ def parse_commandline_arguments():
     parser.add_argument('--noimages', action='store_true', help='do not include any images (in case of illustrated stories)')
     parser.add_argument('-v', '--verbose', action='store_true', help='output more information')
     parser.add_argument('-d', '--debug', action='store_true', help='output debug information')
+    parser.add_argument('--silent', action='store_true', help='suppress informational output')
     parser.add_argument('--disk-cache-path', metavar='PATH', help='Path for the disk cache (optional, usually not required). If this option is specified, downloaded websites are cached in a file and loaded from disk in subsequent runs (when this option is used again with the same path). This is mainly useful for testing, to avoid repeated downloads. Without this option, litepubify keeps everything in memory and only writes the final epub file to disk.')
     args = parser.parse_args()
 
@@ -198,6 +199,7 @@ def make_epub_from_story_or_series(s, author):
     if args.output:
         arch_filename = args.output
     book.make_epub(arch_filename)
+    info("finished, written to '{}'".format(arch_filename))
 
 def add_story_to_ebook(st, filename, book):
     """Add a story to an ebook.
@@ -535,7 +537,7 @@ def fetch_url(url, binary=False):
         path = os.path.join(args.disk_cache_path, url_to_filepath_hash(url))
         mime_path = os.path.join(args.disk_cache_path, url_to_filepath_hash(url) + 'MIME')
         if (os.path.isfile(path) and os.path.isfile(mime_path)):
-            verbose("fetched from disk cache: '{}'".format(url))
+            info("fetched from disk cache: '{}'".format(url))
             data = io.open(path, 'rb').read()
             if not binary:
                 data = data.decode('UTF-8')
@@ -543,7 +545,7 @@ def fetch_url(url, binary=False):
             mime_type = mime_type.decode('UTF-8')
             url_mem_cache[url] = (data, mime_type)
             return data, mime_type
-    verbose("downloading '{}'...".format(url))
+    info("downloading '{}'...".format(url))
     req = compat_urllib_request.Request(url, headers={ 'User-Agent': get_user_agent() })
     response = compat_urllib_request.urlopen(req)
     data = response.read()
@@ -782,16 +784,23 @@ class ZipWriter(FrozenClass):
 def get_user_agent():
     return "litepubify {}".format(VERSION)
 
+def info(msg):
+    """Helper function to output information messages, as long as they haven't
+    been silenced.
+    """
+    if not args.silent:
+        print(msg)
+
 def verbose(msg):
     """Helper function to output verbose messages in case they have been activated.
     """
-    if args.verbose or args.debug:
+    if not args.silent and (args.verbose or args.debug):
         print(msg)
 
 def debug(msg):
     """Helper function to output debug messages in case they have been activated.
     """
-    if args.debug:
+    if not args.silent and args.debug:
         print(msg)
 
 def warning(msg):

@@ -33,6 +33,7 @@ optional arguments:
                         contents
   -v, --verbose         output more information
   -d, --debug           output debug information
+  --silent              suppress informational output
   --disk-cache-path PATH
                         Path for the disk cache (this is normally not needed).
                         If this option is specified, downloaded websites are
