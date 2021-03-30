@@ -558,7 +558,7 @@ def fetch_url(url, binary=False):
             url_mem_cache[url] = (data, mime_type)
             return data, mime_type
     info("downloading '{}'...".format(url))
-    req = compat_urllib_request.Request(url, headers={ 'User-Agent': get_user_agent() })
+    req = compat_urllib_request.Request(url, headers={ 'User-Agent': get_user_agent(), 'Cookie': 'enable_classic=1' })
     response = compat_urllib_request.urlopen(req)
     data = response.read()
     mime_type = get_content_type(response)
